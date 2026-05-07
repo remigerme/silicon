@@ -1,5 +1,6 @@
 .idea
 .idea_modules
+.vscode 
 common/target
 project/project
 project/target
@@ -24,3 +25,4 @@ viper_tutorial_examples
 .bsp/
 .bloop/
 .metals/
+project/metals.sbt
