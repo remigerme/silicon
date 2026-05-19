@@ -491,6 +491,14 @@ object magicWandSupporter extends SymbolicExecutionRules {
           // Consolidate the state and remove labelled old heap "lhs".
           val s6 = v3.stateConsolidator(s5).consolidate(s5, v3).copy(oldHeaps = s1.oldHeaps)
 
+          // TODO@ DOC
+          val magicWandToken = snapWand.get match {
+            case snapshot: MagicWandSnapshot => snapshot.yieldToken(snapLhs.get)
+            case SortWrapper(snapshot: MagicWandSnapshot, _) => snapshot.yieldToken(snapLhs.get)
+            case _ => sys.error("todo what about this case") // TODO@
+          }
+          v3.decider.assume(magicWandToken, None) // TODO@: provide a debugExp
+
           Q(s6, v3)
         })
       })
