@@ -804,6 +804,45 @@ object evaluator extends EvaluationRules {
           eval(s3, eIn, pve, v2)(Q)
         })
 
+      case ast.Attached(fact, wand) =>
+        // 0 - save the verifier
+        v.decider.pushScope()
+
+        // 1 - consuming the wand
+        consume(s, wand, true, pve, v)((s1, snapWand, v1) => {
+          val snapWandInner = snapWand.get match {
+            case snapshot: MagicWandSnapshot => snapshot
+            case SortWrapper(snapshot: MagicWandSnapshot, _) => snapshot
+            // TODO@ PredicateLookup?
+            case _ => sys.error("todo what about this")
+          }
+
+          val s1_ = s1.copy(h = v1.heapSupporter.getEmptyHeap(s1.program))
+
+          // 2 - creating a fresh snapshot to quantify on
+          val tSnap = viper.silicon.utils.freshSnap(sorts.Snap, v1)
+          val token = snapWandInner.yieldToken(tSnap)
+
+          // 3 - producing LHS
+          produce(s1_, toSf(tSnap), wand.left, pve, v1)((sLhs, v2) => {
+            val sLhs_ = sLhs.copy(h = v2.heapSupporter.getEmptyHeap(sLhs.program), 
+                                  oldHeaps = sLhs.oldHeaps + (Verifier.MAGIC_WAND_LHS_STATE_LABEL -> sLhs.h))
+
+            // 4 - producing RHS
+            produce(sLhs_, toSf(snapWandInner.applyToMWSF(tSnap)), wand.right, pve, v2)((s3, v3) => {
+
+              // 5 - evaluating fact
+              eval(s3, fact, pve, v3)((s4, tF, _, v4) => {
+                val attachedFact = Forall(tSnap, Implies(token, tF), Trigger(token), "attached")
+
+                // 6 - reverting the verifier and the initial heaps
+                v4.decider.popScope()
+                Q(s4.copy(h = s.h, oldHeaps = s.oldHeaps), attachedFact, None, v4)
+              })
+            })
+          })
+        })
+
       /* Sequences */
 
       case ast.SeqContains(e0, e1) => evalBinOp(s, e1, e0, SeqIn, pve, v)((s1, t, e1New, e0New, v1) =>
