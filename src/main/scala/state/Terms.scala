@@ -2306,6 +2306,11 @@ class MagicWandSnapshot(val mwsf: Term) extends Term with ConditionalFlyweight[T
    * @return The snapshot of the right-hand side that preserves the values of the left-hand side.
    */
   def applyToMWSF(snapLhs: Term): Term = MWSFLookup(mwsf, snapLhs)
+
+  /**
+   * TODO@ DOC
+   */
+  def yieldToken(snapLhs: Term): Term = MagicWandToken(mwsf, snapLhs)
 }
 
 object MagicWandSnapshot extends PreciseCondFlyweightFactory[Term, MagicWandSnapshot]  {
@@ -2340,6 +2345,30 @@ object MWSFLookup extends PreciseCondFlyweightFactory[(Term, Term), MWSFLookup] 
   override def actualCreate(args: (Term, Term)): MWSFLookup =
     new MWSFLookup(args._1, args._2)
 }
+
+/**
+ * TODO@ DOC
+ */
+class MagicWandToken(val mwsf: Term, val snapLhs: Term) extends Term with ConditionalFlyweightBinaryOp[MagicWandToken] {
+  val sort: Sort = sorts.Bool
+  override def p0: Term = mwsf
+  override def p1: Term = snapLhs
+  override lazy val toString = s"MW_token($mwsf, $snapLhs)"
+}
+
+object MagicWandToken extends PreciseCondFlyweightFactory[(Term, Term), MagicWandToken] {
+  override def apply(pair: (Term, Term)): MagicWandToken = {
+    val (mwsf, snapLhs) = pair
+    utils.assertSort(mwsf, "mwsf", sorts.MagicWandSnapFunction)
+    utils.assertSort(snapLhs, "snap", sorts.Snap)
+    createIfNonExistent(pair)
+  }
+
+  /** Create an instance of [[viper.silicon.state.terms.MagicWandToken]]. */
+  override def actualCreate(args: (Term, Term)): MagicWandToken =
+    new MagicWandToken(args._1, args._2)
+}
+
 
 class MagicWandChunkTerm(val chunk: MagicWandChunk) extends Term with ConditionalFlyweight[MagicWandChunk, MagicWandChunkTerm] {
   override val sort = sorts.Unit /* TODO: Does this make sense? */
