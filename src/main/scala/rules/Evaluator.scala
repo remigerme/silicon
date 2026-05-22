@@ -837,6 +837,9 @@ object evaluator extends EvaluationRules {
 
                 // 6 - reverting the verifier and the initial heaps
                 v4.decider.popScope()
+                // We also need to assert that token => precondition of functions mentioned in the fact hold,
+                // otherwise the SMT solver is unable to reason over the function calls.
+                v4.decider.assume(FunctionPreconditionTransformer.transform(attachedFact, s4.program), None)
                 Q(s4.copy(h = s.h, oldHeaps = s.oldHeaps), attachedFact, None, v4)
               })
             })
@@ -1081,6 +1084,7 @@ object evaluator extends EvaluationRules {
          | _: ast.Maplet
          | _: ast.FieldAccessPredicate
          | _: ast.MagicWand
+         | _: ast.Attaching
          | _: ast.PredicateAccess
          | _: ast.PredicateAccessPredicate
          | _: ast.ExtensionExp =>
