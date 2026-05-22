@@ -571,9 +571,9 @@ object executor extends ExecutionRules {
             })
           }))
 
-      case pckg @ ast.Package(wand, proofScript) =>
+      case pckg @ ast.Package(wand, attachings, proofScript) =>
         val pve = PackageFailed(pckg)
-          magicWandSupporter.packageWand(s.copy(isInPackage = true), wand, proofScript, pve, v)((s1, chWand, v1) => {
+          magicWandSupporter.packageWand(s.copy(isInPackage = true), wand, attachings, proofScript, pve, v)((s1, chWand, v1) => {
 
             val hOps = s1.reserveHeaps.head + chWand
             assert(s.exhaleExt || s1.reserveHeaps.length == 1)
@@ -603,7 +603,15 @@ object executor extends ExecutionRules {
               case _ => s2
             }
 
-            continuation(s3.copy(isInPackage = s.isInPackage), v1)
+            /* We have verified that attached facts hold true during `packageWand`. We now produce them
+             * in fresh snaps, which will actually not be used because all the attached facts are pure.
+             * All the heavy lifting is done by the evaluation of `Attached(fact, wand)`, which also
+             * makes sure to push and pop the verifier context so it doesn't leak from one fact to another.
+             */
+            val facts = attachings map { a => ast.Attached(a.fact, wand)(a.pos, a.info, a.errT) }
+            produces(s3.copy(isInPackage = s.isInPackage), freshSnap, facts, _ => pve, v1)((s4, v2) => {
+              continuation(s4, v2)
+            })
           })
 
       case apply @ ast.Apply(e) =>

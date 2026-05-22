@@ -22,6 +22,7 @@ import viper.silver.cfg.Edge
 import viper.silver.cfg.silver.SilverCfg.SilverBlock
 import viper.silver.parser.PUnknown
 import viper.silver.verifier.PartialVerificationError
+import viper.silver.verifier.errors.AttachingFailed
 
 object magicWandSupporter extends SymbolicExecutionRules {
   import consumer._
@@ -224,6 +225,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
    *
    * @param state Current state.
    * @param wand AST representation of the magic wand.
+   * @param attachings Sequence of AST of the facts attached to the wand.
    * @param proofScript AST of the proof script. The proof script contains instructions how we can construct the RHS given the LHS.
    * @param pve Partial Verification Error that is used to report errors.
    * @param v Verifier instance.
@@ -232,6 +234,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
    */
   def packageWand(state: State,
                   wand: ast.MagicWand,
+                  attachings: Seq[ast.Attaching],
                   proofScript: ast.Seqn,
                   pve: PartialVerificationError,
                   v: Verifier)
@@ -395,9 +398,22 @@ object magicWandSupporter extends SymbolicExecutionRules {
         // Execute proof script, i.e. the part written after the magic wand wrapped by curly braces.
         // The proof script should transform the current state such that we can consume the wand's RHS.
         executor.exec(s2, proofScriptCfg, v2)((proofScriptState, proofScriptVerifier) => {
+          /* Each attached fact must be checked independently from the others. If we just `consumes` all the facts
+           * at once, there might be interferences (e.g. some path conditions registered for the first fact stay
+           * in context when consuming the second fact).
+           * TODO: investigate how deep/real of an issue this is? For now, it feels safer to consume each fact 
+           * with a clean state and verifier. 
+           */
+          val attachingFactsResult = attachings.foldLeft[VerificationResult](Success())((acc, attaching) =>
+            acc combine executionFlowController.locally(proofScriptState, proofScriptVerifier)((sLoc, vLoc) => {
+              val pve_attaching = AttachingFailed(attaching)
+              consume(sLoc, attaching.fact, false, pve_attaching, vLoc)((_, _, _) => Success())
+            })
+          )
+
           // Consume the wand's RHS and produce a snapshot which records all the values of variables on the RHS.
           // This part indirectly calls the methods `this.transfer` and `this.consumeFromMultipleHeaps`.
-          consume(
+          attachingFactsResult combine consume(
             proofScriptState.copy(oldHeaps = s2.oldHeaps, reserveCfgs = proofScriptState.reserveCfgs.tail),
             wand.right, true, pve, proofScriptVerifier
           )((s3, snapRhs, v3) => {
