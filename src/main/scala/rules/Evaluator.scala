@@ -120,9 +120,11 @@ object evaluator extends EvaluationRules {
      * evaluation to perform involves consuming or producing permissions, e.g. because of
      * an unfolding expression, these should not be recorded.
      */
-    val s1 = s.copy(h = magicWandSupporter.getEvalHeap(s),
-                    reserveHeaps = Nil,
-                    exhaleExt = false)
+    val h1 = e match {
+      case _: ast.Attached => magicWandSupporter.getAttachedEvalHeap(s) // see the in_package.vpr test case of attached facts for more details
+      case _ => magicWandSupporter.getEvalHeap(s)
+    }
+    val s1 = s.copy(h = h1, reserveHeaps = Nil, exhaleExt = false)
 
     eval2(s1, e, pve, v)((s2, t, eNew, v1) => {
       val s3 =

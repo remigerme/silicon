@@ -400,9 +400,12 @@ object consumer extends ConsumptionRules {
      * the tryOrFail that wraps the consumption of each top-level conjunct would not consolidate
      * the right heap.
      */
-    val s1 = s.copy(h = magicWandSupporter.getEvalHeap(s),
-                    reserveHeaps = Nil,
-                    exhaleExt = false)
+
+    val h1 = e match {
+      case _: ast.Attached => magicWandSupporter.getAttachedEvalHeap(s) // see the in_package.vpr test case of attached facts for more details
+      case _ => magicWandSupporter.getEvalHeap(s)
+    }
+    val s1 = s.copy(h = h1, reserveHeaps = Nil, exhaleExt = false)
 
     executionFlowController.tryOrFail0(s1, v)((s2, v1, QS) => {
       eval(s2, e, pve, v1)((s3, t, eNew, v2) => {

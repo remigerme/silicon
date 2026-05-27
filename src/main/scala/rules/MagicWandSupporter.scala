@@ -583,6 +583,12 @@ object magicWandSupporter extends SymbolicExecutionRules {
       s.h
   }
 
+  def getAttachedEvalHeap(s: State): Heap = {
+    // See the in_package.vpr test case of attached facts for more details.
+    if (s.exhaleExt) s.reserveHeaps.foldLeft(s.h)(_ + _)
+    else s.h
+  }
+
   def getExecutionHeap(s: State): Heap =
     if (s.exhaleExt) s.reserveHeaps.head
     else s.h
