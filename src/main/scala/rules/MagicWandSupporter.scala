@@ -398,27 +398,27 @@ object magicWandSupporter extends SymbolicExecutionRules {
         // Execute proof script, i.e. the part written after the magic wand wrapped by curly braces.
         // The proof script should transform the current state such that we can consume the wand's RHS.
         executor.exec(s2, proofScriptCfg, v2)((proofScriptState, proofScriptVerifier) => {
-          /* Each attached fact must be checked independently from the others. If we just `consumes` all the facts
-           * at once, there might be interferences (e.g. some path conditions registered for the first fact stay
-           * in context when consuming the second fact).
-           * TODO: investigate how deep/real of an issue this is? For now, it feels safer to consume each fact 
-           * with a clean state and verifier. 
-           */
-          val attachingFactsResult = attachings.foldLeft[VerificationResult](Success())((acc, attaching) =>
-            acc combine executionFlowController.locally(proofScriptState, proofScriptVerifier)((sLoc, vLoc) => {
-              val pve_attaching = AttachingFailed(attaching)
-              consume(sLoc, attaching.fact, false, pve_attaching, vLoc)((_, _, _) => Success())
-            })
-          )
-
           // Consume the wand's RHS and produce a snapshot which records all the values of variables on the RHS.
           // This part indirectly calls the methods `this.transfer` and `this.consumeFromMultipleHeaps`.
-          attachingFactsResult combine consume(
+          consume(
             proofScriptState.copy(oldHeaps = s2.oldHeaps, reserveCfgs = proofScriptState.reserveCfgs.tail),
             wand.right, true, pve, proofScriptVerifier
           )((s3, snapRhs, v3) => {
+            /* Each attached fact must be checked independently from the others. If we just `consumes` all the facts
+            * at once, there might be interferences (e.g. some path conditions registered for the first fact stay
+            * in context when consuming the second fact).
+            * TODO: investigate how deep/real of an issue this is? For now, it feels safer to consume each fact 
+            * with a clean state and verifier. 
+            */
+            val attachingFactsResult = attachings.foldLeft[VerificationResult](Success())((acc, attaching) =>
+              acc combine executionFlowController.locally(s3, v3)((sLoc, vLoc) => {
+                val pve_attaching = AttachingFailed(attaching)
+                consume(sLoc, attaching.fact, false, pve_attaching, vLoc)((_, _, _) => Success())
+              })
+            )
 
-            createWandChunkAndRecordResults(s3.copy(exhaleExt = false, oldHeaps = s.oldHeaps), freshSnapRoot, snapRhs.get, v3)
+            attachingFactsResult combine 
+              createWandChunkAndRecordResults(s3.copy(exhaleExt = false, oldHeaps = s.oldHeaps), freshSnapRoot, snapRhs.get, v3)
           })
         })
       })
