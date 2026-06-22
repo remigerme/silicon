@@ -673,7 +673,7 @@ object executor extends ExecutionRules {
          } else {
             (None, None)
          }
-         v.decider.assumeDefinition(BuiltinEquals(t, rhs), debugExp)
+         v.decider.assume(BuiltinEquals(t, rhs), debugExp)
          (t, eNew)
      }
    }

@@ -207,7 +207,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
           val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s3, field, Seq(tRcvr), tRhs, v)
           v.decider.prover.comment("Definitional axioms for singleton-FVF's value")
           val debugExp = Option.when(withExp)(DebugExp.createInstance("Definitional axioms for singleton-FVF's value", isInternal_ = true))
-          v.decider.assumeDefinition(smValueDef, debugExp)
+          v.decider.assume(smValueDef, debugExp)
           val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(Seq(`?r`), Option.when(withExp)(Seq(ast.LocalVarDecl("r", ast.Ref)(ass.pos, ass.info, ass.errT))),
             field, Seq(tRcvr), Option.when(withExp)(Seq(eRcvrNew.get)), FullPerm, Option.when(withExp)(ast.FullPerm()(ass.pos, ass.info, ass.errT)), sm, s.program)
           if (s3.heapDependentTriggers.contains(field)) {

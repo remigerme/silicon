@@ -110,9 +110,23 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
         (functionRecorder, hs :+ Heap(mergedChunks))
       }
 
+    /* If we're in a package:
+      - h is not relevant
+      - the first three reserveHeaps are the internal heaps (see `MagicWandSupporter.scala`),
+        the following are the outer heaps: merging them (i.e. the package operation has a
+        side-effect on the outer heaps) is unsound, as exhibited by //@ TODO name of the regression test.
+        Do not use `s.isInPackage` as `evalAndAssert` in consume temporarily forget about the reserveHeaps,
+        while we are still within the package. The reserveHeaps are correlated with `s.exhaleExt`.
+    */
+    val h = if (s.exhaleExt) { s.h } else { mergedHeaps.head }
+    val reserveHeaps = if (s.exhaleExt) {
+      (Seq(mergedHeaps(1)) :+ mergedHeaps(2) :+ mergedHeaps(3)) ++ s.reserveHeaps.drop(3)
+     } else {
+      mergedHeaps.tail
+    }
     val s1 = s.copy(functionRecorder = functionRecorderAfterHeapMerging,
-                    h = mergedHeaps.head,
-                    reserveHeaps = mergedHeaps.tail)
+                    h = h,
+                    reserveHeaps = reserveHeaps)
 
     val s2 = assumeUpperPermissionBoundForQPFields(s1, v)
 

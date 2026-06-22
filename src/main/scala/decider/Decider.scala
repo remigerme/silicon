@@ -62,9 +62,8 @@ trait Decider {
   def assume(t: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp]): Unit
   def assume(t: Term, debugExp: Option[DebugExp]): Unit
   def assume(terms: Seq[Term], debugExps: Option[Seq[DebugExp]]): Unit
-  def assumeDefinition(t: Term, debugExp: Option[DebugExp]): Unit
   def assume(assumptions: Iterable[(Term, Option[DebugExp])]): Unit
-  def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
+  def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false): Unit
   def assume(terms: Iterable[Term], debugExp: Option[DebugExp], enforceAssumption: Boolean): Unit
 
   def check(t: Term, timeout: Int): Boolean
@@ -74,6 +73,7 @@ trait Decider {
    *         2. The implementation reacts to a failing assertion by e.g. a state consolidation
    */
   def assert(t: Term, timeout: Option[Int] = None)(Q:  Boolean => VerificationResult): VerificationResult
+  def assertNonCps(t: Term, timeout: Option[Int] = None): Boolean
 
   def fresh(id: String, sort: Sort, ptype: Option[PType]): Var
   def fresh(id: String, argSorts: Seq[Sort], resultSort: Sort): Function
@@ -277,14 +277,14 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
     }
 
     def assume(t: Term, e : ast.Exp, finalExp : ast.Exp): Unit = {
-      assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e, finalExp)))), false, false)
+      assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e, finalExp)))), enforceAssumption=false)
     }
 
     def assume(t: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp]): Unit = {
       if (finalExp.isDefined) {
-        assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e.get, finalExp.get)))), false, false)
+        assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e.get, finalExp.get)))), enforceAssumption=false)
       } else {
-        assume(assumptions=InsertionOrderedSet((t, None)), false, false)
+        assume(assumptions=InsertionOrderedSet((t, None)), enforceAssumption=false)
       }
     }
 
@@ -292,14 +292,10 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       assume(InsertionOrderedSet(Seq((t, debugExp))), false)
     }
 
-    def assumeDefinition(t: Term, debugExp: Option[DebugExp]): Unit = {
-      assume(InsertionOrderedSet(Seq((t, debugExp))), enforceAssumption=false, isDefinition=true)
-    }
-
     def assume(assumptions: Iterable[(Term, Option[DebugExp])]): Unit =
       assume(InsertionOrderedSet(assumptions), false)
 
-    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit = {
+    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false): Unit = {
       val filteredAssumptions =
         if (enforceAssumption) assumptions
         else assumptions filterNot (a => isKnownToBeTrue(a._1))
@@ -309,7 +305,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
         filteredAssumptions foreach (a => addDebugExp(a._2.get.withTerm(a._1)))
       }
 
-      if (filteredAssumptions.nonEmpty) assumeWithoutSmokeChecks(filteredAssumptions map (_._1), isDefinition=isDefinition)
+      if (filteredAssumptions.nonEmpty) assumeWithoutSmokeChecks(filteredAssumptions map (_._1))
     }
 
     def assume(assumptions: Seq[Term], debugExps: Option[Seq[DebugExp]]): Unit = {
@@ -341,16 +337,12 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       })
     }
 
-    private def assumeWithoutSmokeChecks(terms: InsertionOrderedSet[Term], isDefinition: Boolean = false) = {
+    private def assumeWithoutSmokeChecks(terms: InsertionOrderedSet[Term]) = {
       val assumeRecord = new DeciderAssumeRecord(terms)
       val sepIdentifier = symbExLog.openScope(assumeRecord)
 
       /* Add terms to Silicon-managed path conditions */
-      if (isDefinition) {
-        terms foreach pathConditions.addDefinition
-      } else {
-        terms foreach pathConditions.add
-      }
+      terms foreach pathConditions.add
 
       /* Add terms to the prover's assumptions */
       terms foreach prover.assume
@@ -384,6 +376,17 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
         symbExLog.setSMTQuery(t)
 
       Q(success)
+    }
+
+    def assertNonCps(t: Term, timeout: Option[Int] = Verifier.config.assertTimeout.toOption): Boolean = {
+      val success = deciderAssert(t, timeout)
+
+      if (success)
+        symbExLog.discardSMTQuery()
+      else
+        symbExLog.setSMTQuery(t)
+
+      success
     }
 
     private def deciderAssert(t: Term, timeout: Option[Int]) = {

@@ -111,41 +111,44 @@ object chunkSupporter extends ChunkSupportRules {
                       (Q: (State, Heap, Option[Term], Verifier) => VerificationResult)
                       : VerificationResult = {
 
+    def guardSnapshotIfPermsNull(v: Verifier, snap: Term): Term = {
+      if (v.decider.check(IsPositive(perms), Verifier.config.checkTimeout()))
+        snap
+      else
+        Ite(IsPositive(perms), snap.convert(sorts.Snap), Unit)
+    }
+
+    def getOptSnap(v: Verifier, optCh: Option[NonQuantifiedChunk]): Option[Term] = {
+      optCh match {
+        case Some(ch) if returnSnap => Some(guardSnapshotIfPermsNull(v, ch.snap))
+        case _ => None
+      }
+    }
+
     val id = ChunkIdentifier(resource, s.program)
     if (s.exhaleExt) {
       val failure = createFailure(ve, v, s, "chunk consume in package")
-      magicWandSupporter.transfer(s, perms, permsExp, failure, Seq(), v)(consumeGreedy(_, _, id, args, _, _, _))((s1, optCh, v1) =>
-        if (returnSnap){
-          Q(s1, h, optCh.flatMap(ch => Some(ch.snap)), v1)
-        } else {
-          Q(s1, h, None, v1)
-        })
+      magicWandSupporter.transfer(s, perms, permsExp, failure, Seq(), v)((s0, h0, perms, permsExp, v0) =>
+        if (s0.moreCompleteExhale)
+          moreCompleteExhaleSupporter.consumeComplete(s0, h0, resource, args, argsExp, perms, permsExp, v0)
+        else
+          consumeGreedy(s0, h0, id, args, perms, permsExp, v0)
+      )((s1, optCh, v1) => Q(s1, h, getOptSnap(v1, optCh), v1))
     } else {
-      executionFlowController.tryOrFail2[Heap, Option[Term]](s.copy(h = h), v)((s1, v1, QS) =>
-        if (s1.moreCompleteExhale) {
-          moreCompleteExhaleSupporter.consumeComplete(s1, s1.h, resource, args, argsExp, perms, permsExp, returnSnap, ve, v1)((s2, h2, snap2, v2) => {
-            QS(s2.copy(h = s.h), h2, snap2, v2)
-          })
-        } else {
-          consumeGreedy(s1, s1.h, id, args, perms, permsExp, v1) match {
-            case (Complete(), s2, h2, optCh2) =>
-              val snap = optCh2 match {
-                case Some(ch) if returnSnap =>
-                  if (v1.decider.check(IsPositive(perms), Verifier.config.checkTimeout())) {
-                    Some(ch.snap)
-                  } else {
-                    Some(Ite(IsPositive(perms), ch.snap.convert(sorts.Snap), Unit))
-                  }
-                case _ => None
-              }
-              QS(s2.copy(h = s.h), h2, snap, v1)
-            case _ if v1.decider.checkSmoke(true) =>
-              Success() // TODO: Mark branch as dead?
-            case _ =>
-              createFailure(ve, v1, s1, "consuming chunk", true)
-          }
+      executionFlowController.tryOrFail2[Heap, Option[Term]](s.copy(h = h), v)((s1, v1, QS) => {
+        val consumeFunction = if (s1.moreCompleteExhale)
+          moreCompleteExhaleSupporter.consumeComplete(_, _, resource, _, argsExp, _, _, _)
+        else
+          consumeGreedy(_, _, id, _, _, _, _)
+        consumeFunction(s1, s1.h, args, perms, permsExp, v1) match {
+          case (Complete(), s2, h2, optCh) => 
+            QS(s2.copy(h = s.h), h2, getOptSnap(v1, optCh), v1)
+          case _ if v1.decider.checkSmoke(true) =>
+            Success() // TODO: Mark branch as dead?
+          case _ =>
+            createFailure(ve, v1, s1, "consuming chunk", true)
         }
-      )(Q)
+      })(Q)
     }
   }
 
