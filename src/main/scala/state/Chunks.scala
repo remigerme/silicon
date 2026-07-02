@@ -280,6 +280,8 @@ case class MagicWandChunk(id: MagicWandIdentifier,
     }
   }
 
+  def withBindings(newBindings: Map[ast.AbstractLocalVar, (Term, Option[ast.Exp])]) = MagicWandChunk(id, newBindings, args, argsExp, snap, perm, permExp)
+
   override lazy val toString = {
     val pos = id.ghostFreeWand.pos match {
       case rp: viper.silver.ast.HasLineColumn => s"${rp.line}:${rp.column}"

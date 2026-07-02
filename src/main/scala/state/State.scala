@@ -311,8 +311,6 @@ object State {
 
   // Merge several maps at once.
   // If a key is missing in at least one map, the entry will be discarded in the resulting map.
-  // @TODO this was the behavior of all callers of the previous mergeMaps function,
-  // but is this what we want (used to merge Stores and oldHeaps)?
   private def mergeMaps[K, V](mapsAndBranchConditions: Seq[(Map[K, V], Term, Option[ast.Exp])])
                              (mergeEntries: Seq[(V, Term, Option[ast.Exp])] => V)
                              : Map[K, V] = {
@@ -323,6 +321,24 @@ object State {
       val entriesAndBranchConditions = mapsAndBranchConditions.map({ case (m, bc, bcExp) => (m(k), bc, bcExp)})
       (k, mergeEntries(entriesAndBranchConditions))
     }))
+  }
+
+  def mergeBindings(bindingsAndBranchConditions: Seq[(Map[ast.AbstractLocalVar, (Term, Option[ast.Exp])], Term, Option[ast.Exp])])
+                   : Map[ast.AbstractLocalVar, (Term, Option[ast.Exp])] = {
+    mergeMaps(bindingsAndBranchConditions)(localsAndBranchConditions => {
+      // Checking if all entries are the same
+      val locals = localsAndBranchConditions.map(_._1)
+      if (locals.forall(_._1 == locals.head._1)) {
+        locals.head
+      } else {
+        assert(locals.forall(_._1.sort == locals.head._1.sort))
+        // Naively cascading Ite terms
+        localsAndBranchConditions.tail.foldLeft(locals.head)({
+          case (acc, (local, bc, bcExp)) =>
+            (Ite(bc, local._1, acc._1), bcExp.map(cond => ast.CondExp(cond, local._2.get, acc._2.get)()))
+        })
+      }
+    })
   }
 
   // Puts a collection of chunks under a condition.
@@ -419,7 +435,7 @@ object State {
   def merge(statesAndBranchConditions: Seq[(State, Term, Option[ast.Exp])]): State = {
     require(statesAndBranchConditions.nonEmpty, "Cannot merge an empty collection of states")
 
-    //@ TODO explain what happens when merging a single state
+    // Merging a single state is a no-op and won't conditionalize the store/heaps.
 
     val states = statesAndBranchConditions.map(_._1)
     mergeCheckInputs(states)
@@ -431,22 +447,7 @@ object State {
     val smDomainNeeded = states.map(_.smDomainNeeded).reduce(_ || _)
     val moreCompleteExhale = states.map(_.moreCompleteExhale).reduce(_ || _)
 
-    val g = Store(mergeMaps(statesAndBranchConditions.map({case (s, bc, bcExp) => (s.g.values, bc, bcExp)}))
-      (localsAndBranchConditions => {
-        // Checking if all entries are the same
-        val locals = localsAndBranchConditions.map(_._1)
-        if (locals.forall(_._1 == locals.head._1)) {
-          locals.head
-        } else {
-          assert(locals.forall(_._1.sort == locals.head._1.sort))
-          //@ Todo reduce in a smarter way?
-          localsAndBranchConditions.tail.foldLeft(locals.head)({
-            case (acc, (local, bc, bcExp)) =>
-              (Ite(bc, local._1, acc._1), bcExp.map(cond => ast.CondExp(cond, local._2.get, acc._2.get)()))
-          })
-        }
-      }))
-    
+    val g = Store(mergeBindings(statesAndBranchConditions.map({case (s, bc, bcExp) => (s.g.values, bc, bcExp)})))    
     val h = mergeHeaps(statesAndBranchConditions.map({case (s, bc, bcExp) => (s.h, bc, bcExp)}), false)
 
     val partiallyConsumedHeap = statesAndBranchConditions.map({case (s, bc, bcExp) => 

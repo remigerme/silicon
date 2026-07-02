@@ -158,9 +158,12 @@ object magicWandSupporter extends SymbolicExecutionRules {
               case (Some(ch1: QuantifiedBasicChunk), Some(ch2: QuantifiedBasicChunk)) => ch1.snapshotMap === ch2.snapshotMap
               case _ => True
             }
-            //@ TODO probably something interesting here to (later) propagate the learned constraints
             v.decider.assume(tEq, Option.when(withExp)(DebugExp.createInstance("Snapshots", isInternal_ = true)))
-            v.logger.debug(s"ADDING ONE EQ: $tEq")
+            /* We specifically record the equated snapshots, because we won't be able to retrieve specifically those later.
+             * These specific path conditions can safely be propagated unguarded outside of the package (is the LHS does not
+             * appear in any of the snapshots, which we will check later).
+             * Not propagating these equalities will lead to an incompleteness, see `packaging_1.vpr` for details. 
+             */
             val sOut = sMid.copy(equatedSnapshots = sMid.equatedSnapshots :+ tEq)
 
             /* In the future it might be worth to recheck whether the permissions needed, in the case of
@@ -329,8 +332,6 @@ object magicWandSupporter extends SymbolicExecutionRules {
         } else {
           val ch = MagicWandChunk(MagicWandIdentifier(wand, s.program), s2.g.values, tArgs, eArgsNew, wandSnapshot, FullPerm,
             Option.when(withExp)(ast.FullPerm()(wand.pos, wand.info, wand.errT)))
-          // s2.conservedPcs.head.flatMap(_.conditionalized).foreach(t => v2.logger.debug(s"CPC: $t"))
-          // v2.decider.pcs.conditionalized.foreach(t => v2.logger.debug(s"DPC: $t"))
           val conservedPcs = /*s2.conservedPcs.head*/ Vector() :+ v2.decider.pcs
           val pcs = conservedPcs.flatMap(pcs => pcs.conditionalized)
           val pcsWithoutExp = Option.when(withExp)(filterDebugExpsWithoutSnapshot(conservedPcs.flatMap(pcs => pcs.conditionalizedExp), freshSnapRoot))
@@ -410,46 +411,46 @@ object magicWandSupporter extends SymbolicExecutionRules {
       createWandChunkAndRecordResults(s1, freshSnap(sorts.Snap, v), v)
     }
 
-    // val firstBranch = recordedBranches.head
-    // val (bcsWithLhs, bcsWithoutLhs) = firstBranch._2.partition(_.contains(freshSnapRoot))
-    // val bcExternalInit = And(bcsWithoutLhs)
-    // val bcExpInit = viper.silicon.utils.ast.BigAnd(firstBranch._3.map(_._1))
-    // val bcExpNewInit = Option.when(withExp)(viper.silicon.utils.ast.BigAnd(firstBranch._3.map(_._2.get)))
-    // val init = (firstBranch._1, bcExternalInit, (bcExpInit, bcExpNewInit), bcsWithLhs, firstBranch._4, firstBranch._5)
-    // val (stateMerged, bcExternalMerged, bcExternalExpMerged, bcsInternal, conservedPcsMerged, chunkMerged) = 
-    //   recordedBranches.tail.foldLeft(init)((acc, cur) => {
-    //   val (stateAcc, bcAcc, bcExpAcc, bcsIntAcc, conservedPcsAcc, chunkAcc) = acc
-    //   val (stateCur, bcsCur, bcsExpCur, conservedPcsCur, chunkCur) = cur
-
-    //   val (bcsWithLhs, bcsWithoutLhs) = bcsCur.partition(_.contains(freshSnapRoot))
-
-    //   // Restoring external branch conditions for the state being merged
-    //   val bcCur = And(bcsWithoutLhs)
-    //   val exp = viper.silicon.utils.ast.BigAnd(bcsExpCur.map(_._1))
-    //   val expNew = Option.when(withExp)(viper.silicon.utils.ast.BigAnd(bcsExpCur.map(_._2.get)))
-
-    //   // Merging states, branch conditions, conservedPcs and chunks
-    //   val stateMerged = State.merge(stateAcc, bcAcc, bcExpAcc._2, stateCur, bcCur, expNew)
-    //   val bcMerged = Or(bcAcc, bcCur)
-    //   // val bcExpMerged = ???
-    //   // val bcExpNewMerged = ???
-    //   val bcsInternal = bcsIntAcc ++ bcsWithLhs
-
-    //   (stateMerged, bcMerged, bcExpAcc, bcsInternal, (conservedPcsAcc._1 ++ conservedPcsCur._1, None), chunkCur)
-    // })
-
-    //@ TODO
+    /* The branch conditions will be used to conditionalize the heaps-to-be-merged (and the rest of the states as well).
+     * A first attempt was to take into account only the branch conditions that do not depend on the lhs.
+     * However this is unsound, let's look at the following example:
+     * 
+     * ... field b: Bool
+     * ... field f g h: Int 
+     * ... b1: Bool
+     * ... package acc(x.b) --* b1 ? (acc(x.b) && x.b ? acc(x.f) : acc(x.g)) : acc(x.h)
+     * 
+     * We record three branches (branch condition, heap still left):
+     *   -  b1 &&  x.b: [x.g, x.h]
+     *   -  b1 && !x.b: [x.f, x.h]
+     *   - !b1        : [x.b, x.f, x.g]
+     * We don't want to keep only conditions on b1 as it would lead to have a all three x.f, x.g, x.h.
+     * Whereas we want to do the opposite: we want to intersect heaps who vary only on a condition
+     * depending on the LHS, as we cannot say which branch was used and thus all permissions that might be
+     * necessary in one of the branches should be packed in the footprint. We'd like to conclude:
+     *   -  b1: [x.h]
+     *   - !b1: [x.b, x.f, x.g]
+     * 
+     * Rather than doing this intersection manually, we can rely on the solver, and just
+     * use the branch conditions using a new unknown dangling variable for each branch's LHS, so it will prevent
+     * the solver from determining exactly which branch should be used. Instead, it will
+     * come to the conclusion that `b1 ==> acc(x.h)`.
+     */
     val statesAndBranchConditions = recordedBranches.map({case (s, bcs, _, _, _) =>
       val (bcsWithLhs, bcsWithoutLhs) = bcs.partition(_.contains(freshSnapRoot))
       val freshLhs = freshSnap(sorts.Snap, v)
       val bcsWithFreshLhs = bcsWithLhs.map(_.replace(freshSnapRoot, freshLhs))
-      (s, And(bcsWithFreshLhs ++ bcsWithoutLhs), None)
+      (s, And(bcsWithFreshLhs ++ bcsWithoutLhs), None) //@ TODO debug exp
     })
-
     val stateMerged = State.merge(statesAndBranchConditions)
 
-    //@ TODO
-    val chunkMerged = recordedBranches.head._5
+    // All recorded non quantified magic chunks are the same except for their bindings which we merge.
+    val chunkMerged = recordedBranches.head._5 match {
+      case ch: MagicWandChunk =>
+        ch.withBindings(State.mergeBindings(statesAndBranchConditions.map({case (s, bc, bcExp) => (s.g.values, bc, bcExp)})))
+      case ch: QuantifiedMagicWandChunk => sys.error("todo support quantified mw chunk") //@ TODO quantified wand
+      case _ => sys.error("todo fail")
+    }
 
     val summarizedPcs = recordedBranches.map({case (_, branchConditions, _, conservedPcs, _) => {
       And(branchConditions ++ conservedPcs._1)
@@ -459,33 +460,20 @@ object magicWandSupporter extends SymbolicExecutionRules {
 
     val equatedSnapshotsToPropagate = stateMerged.equatedSnapshots.filterNot(_.contains(freshSnapRoot))
 
-    // Do not consolidate before dropping the reserveHeaps.
-    // It would sometimes lead to propagate the PC false outside of the package without it being
-    // guarded by the token (see third test of `0338.vpr`). 
-    // Also, it leads `conditionals3.vpr:224` to fail for some reason.
     val s1 = stateMerged.copy(
       reserveHeaps = stateMerged.reserveHeaps.drop(3),
+      exhaleExt = s.exhaleExt,
       parallelizeBranches = s.parallelizeBranches,
-      equatedSnapshots = equatedSnapshotsToPropagate
+      equatedSnapshots = equatedSnapshotsToPropagate,
     )
 
-    // But do consolidate afterwards!
-    // Otherwise, the consumer fails to properly consume when there are multiple conditionalized chunks
-    // denoting the same resource (but with different conditionalized permissions).
-    // See `conditionals3.vpr:224` that will fail if we do not consolidate, the permissions
-    // for `x.g` would be taken from the 1/2 external ones instead of the 2/5 left from unfolding P (+1/2)
-    // and packaging the nested wand (-1/10).
-    // This sounds like an underlying issue on how we consume conditionalized heaps/chunks within a package.
-    val s2 = v.stateConsolidator(s1).consolidate(s1, v)
+    v.decider.assume(guardedSummarizedPcs, None) //@ TODO debug exp
+    /* The equatedSnapshots not containing the LHS can safely be propagated unguarded.
+     * See comments in consumeFromMultipleHeaps for details.
+     */
+    v.decider.assume(equatedSnapshotsToPropagate, None) //@ TODO debug exp
 
-    tempResult && executionFlowController.locally(s2, v)((sF, vF) => {
-      //@ TODO we can't/don't want(?) really set a branch condition here
-      // vF.decider.setCurrentBranchCondition(bcExternalMerged, bcExternalExpMerged)
-      vF.decider.assume(guardedSummarizedPcs, None) //@ TODO debug exp
-      // vF.decider.assume(equatedSnapshotsToPropagate, None) //@ TODO debug exp
-      
-      Q(sF, chunkMerged, vF)
-    })
+    tempResult && Q(s1, chunkMerged, v)
   }
 
   /**
@@ -537,12 +525,13 @@ object magicWandSupporter extends SymbolicExecutionRules {
           // Consolidate the state and remove labelled old heap "lhs".
           val s6 = v3.stateConsolidator(s5).consolidate(s5, v3).copy(oldHeaps = s1.oldHeaps)
 
-          //@ TODO DOC
+          // We fetch the underlying MagicWandSnapshot to yield a token, thus getting access to path conditions
+          // recorded during package (i.e. at least the definition of the MWSF), and the attached facts.
           val mwsf = snapWand.get match {
             case snapshot: MagicWandSnapshot => Some(snapshot)
             case SortWrapper(snapshot: MagicWandSnapshot, _) => Some(snapshot)
-            case predicateLookup: PredicateLookup => sys.error("todo: support quantified wands")
-            /* This last case supposedly only occurs when we have false in the context. 
+            case predicateLookup: PredicateLookup => sys.error("todo: support quantified wands") //@ TODO quantified
+            /* I believe this last case only occurs when we have false in the context. 
                In that case, we can apply (consume) any wand even though we don't have it/it wouldn't make sense.
                We should still keep going on with the continuation because this is apparently the behavior expected 
                by several pieces of code throughout Silicon. 
