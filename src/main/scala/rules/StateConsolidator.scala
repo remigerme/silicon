@@ -114,7 +114,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
       - h is not relevant
       - the first three reserveHeaps are the internal heaps (see `MagicWandSupporter.scala`),
         the following are the outer heaps: merging them (i.e. the package operation has a
-        side-effect on the outer heaps) is unsound, as exhibited by //@ TODO name of the regression test.
+        side-effect on the outer heaps) is unsound, as exhibited by some tests in `consolidate_outer_heaps.vpr`.
         Do not use `s.isInPackage` as `evalAndAssert` in consume temporarily forget about the reserveHeaps,
         while we are still within the package. The reserveHeaps are correlated with `s.exhaleExt`.
     */

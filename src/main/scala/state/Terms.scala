@@ -2308,7 +2308,11 @@ class MagicWandSnapshot(val mwsf: Term) extends Term with ConditionalFlyweight[T
   def applyToMWSF(snapLhs: Term): Term = MWSFLookup(mwsf, snapLhs)
 
   /**
-   * TODO@ DOC
+   * Yield a token for the provided left-hand side.
+   *
+   * @param snapLhs The snapshot of the left-hand side that should be applied to the magic wand map.
+   * @return The token associated to this wand and left-hand side, used to retrieve path conditions
+   *         recorded during the package and attached facts.
    */
   def yieldToken(snapLhs: Term): Term = MagicWandToken(mwsf, snapLhs)
 }
@@ -2347,7 +2351,11 @@ object MWSFLookup extends PreciseCondFlyweightFactory[(Term, Term), MWSFLookup] 
 }
 
 /**
- * TODO@ DOC
+ * Token used to guard path conditions recorded within package, as well as attached facts to the wand.
+ * We yield such a token for the concrete LHS whenever we apply a wand.
+ * 
+ * @param mwsf Term of sort [[sorts.MagicWandSnapFunction]]. Function from `Snap` to `Snap`.
+ * @param snapLhs Term of sort [[sorts.Snap]] to which the MWSF is applied to. It represents the values of the wand's LHS.
  */
 class MagicWandToken(val mwsf: Term, val snapLhs: Term) extends Term with ConditionalFlyweightBinaryOp[MagicWandToken] {
   val sort: Sort = sorts.Bool

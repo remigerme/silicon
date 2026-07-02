@@ -610,6 +610,15 @@ object executor extends ExecutionRules {
              */
             val facts = attachings map { a => ast.Attached(a.fact, wand)(a.pos, a.info, a.errT) }
             produces(s3.copy(isInPackage = s.isInPackage), freshSnap, facts, _ => pve, v1)((s4, v2) => {
+              /* Consolidate here.
+               * Otherwise, the consumer fails to properly consume when there are multiple conditionalized chunks
+               * denoting the same resource (but with different conditionalized permissions).
+               * See `conditionals3.vpr:224` that will fail if we do not consolidate, the permissions
+               * for `x.g` would be taken from the 1/2 external ones instead of the 2/5 left from unfolding P (+1/2)
+               * and packaging the nested wand (-1/10).
+               * Or, this is also fixed by using the moreCompleteExhaleSupporter.
+               */
+              // val s5 = v2.stateConsolidator(s4).consolidate(s4, v2)
               continuation(s4, v2)
             })
           })
