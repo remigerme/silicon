@@ -160,9 +160,12 @@ object magicWandSupporter extends SymbolicExecutionRules {
             }
             v.decider.assume(tEq, Option.when(withExp)(DebugExp.createInstance("Snapshots", isInternal_ = true)))
             /* We specifically record the equated snapshots, because we won't be able to retrieve specifically those later.
-             * These specific path conditions can safely be propagated unguarded outside of the package (is the LHS does not
+             * These specific path conditions can safely be propagated unguarded outside of the package (if the LHS does not
              * appear in any of the snapshots, which we will check later).
-             * Not propagating these equalities will lead to an incompleteness, see `packaging_1.vpr` for details. 
+             * Not propagating these equalities will lead to an incompleteness, see `packaging_1.vpr` for details.
+             * 
+             * EDIT: this is not sufficient to check if the LHS does not appear in the equated snapshots. We would probably need
+             * a stronger independence property, which we have no easy way to check. Thus, we do not use these equalities for now.
              */
             val sOut = sMid.copy(equatedSnapshots = sMid.equatedSnapshots :+ tEq)
 
@@ -468,10 +471,11 @@ object magicWandSupporter extends SymbolicExecutionRules {
     )
 
     v.decider.assume(guardedSummarizedPcs, None) //@ TODO debug exp
-    /* The equatedSnapshots not containing the LHS can safely be propagated unguarded.
+    /* The equatedSnapshots not containing the LHS *cannot* safely be propagated unguarded.
      * See comments in consumeFromMultipleHeaps for details.
+     * Uncommenting the assume below currently is unsound (cf `package_path_conditions.vpr:snapshot_eq_unsound`).
      */
-    v.decider.assume(equatedSnapshotsToPropagate, None) //@ TODO debug exp
+    // v.decider.assume(equatedSnapshotsToPropagate, None) //@ TODO debug exp
 
     tempResult && Q(s1, chunkMerged, v)
   }
