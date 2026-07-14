@@ -252,7 +252,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
 
     val stackSize = 3 + s.reserveHeaps.tail.size
     // IMPORTANT: Size matches structure of reserveHeaps at [State RHS] below
-    var recordedBranches: Seq[(State, Stack[Term], Stack[(Exp, Option[Exp])], (Seq[Term], Option[Seq[DebugExp]]), Chunk)] = Nil
+    var recordedBranches: Seq[(State, Stack[Term], Stack[(Exp, Option[Exp])], (Seq[Term], Option[Seq[DebugExp]]), Chunk, Term)] = Nil
 
     /* TODO: When parallelising branches, some of the runtime assertions in the code below crash
      *       during some executions - since such crashes are hard to debug, branch parallelisation
@@ -265,7 +265,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
                       recordPcs = true,
                       parallelizeBranches = false)
 
-    def appendToResults(s5: State, ch: Chunk, pcs: RecordedPathConditions, conservedPcs: (Seq[Term], Option[Seq[DebugExp]]), v4: Verifier): Unit = {
+    def appendToResults(s5: State, ch: Chunk, pcs: RecordedPathConditions, conservedPcs: (Seq[Term], Option[Seq[DebugExp]]), wandDef: Term, v4: Verifier): Unit = {
       assert(s5.conservedPcs.nonEmpty, s"Unexpected structure of s5.conservedPcs: ${s5.conservedPcs}")
 
       var conservedPcsStack: Stack[Vector[RecordedPathConditions]] = s5.conservedPcs
@@ -283,7 +283,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
 
       val s6 = s5.copy(conservedPcs = conservedPcsStack, recordPcs = s.recordPcs)
 
-      recordedBranches :+= (s6, v4.decider.pcs.branchConditions, v4.decider.pcs.branchConditionExps, conservedPcs, ch)
+      recordedBranches :+= (s6, v4.decider.pcs.branchConditions, v4.decider.pcs.branchConditionExps, conservedPcs, ch, wandDef)
     }
 
     def filterDebugExpsWithoutSnapshot(debugExps: Seq[DebugExp], snapshot: Term): Seq[DebugExp] = {
@@ -311,7 +311,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
                                         v: Verifier)
                                        : VerificationResult = {
       v.decider.prover.comment(s"Create MagicWandSnapFunction for wand $wand")
-      v.decider.assume(wandSnapshot.applyToMWSF(freshSnapRoot) === snapRhs, Option.when(withExp)(DebugExp.createInstance("Magic wand snapshot definition", true)))
+      val wandDef = wandSnapshot.applyToMWSF(freshSnapRoot) === snapRhs
+      v.decider.assume(wandDef, Option.when(withExp)(DebugExp.createInstance("Magic wand snapshot definition", true)))
 
       val bodyVars = wand.subexpressionsToEvaluate(s.program)
 
@@ -340,7 +341,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
           val pcsWithoutExp = Option.when(withExp)(filterDebugExpsWithoutSnapshot(conservedPcs.flatMap(pcs => pcs.conditionalizedExp), freshSnapRoot))
           (s2, ch, pcs, pcsWithoutExp, v2)
         }
-        appendToResults(s3, ch, v3.decider.pcs, (tPcs, ePcs), v3)
+        appendToResults(s3, ch, v3.decider.pcs, (tPcs, ePcs), wandDef, v3)
         Success()
       })
     }
@@ -439,7 +440,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
      * the solver from determining exactly which branch should be used. Instead, it will
      * come to the conclusion that `b1 ==> acc(x.h)`.
      */
-    val statesAndBranchConditions = recordedBranches.map({case (s, bcs, _, _, _) =>
+    val statesAndBranchConditions = recordedBranches.map({case (s, bcs, _, _, _, _) =>
       val (bcsWithLhs, bcsWithoutLhs) = bcs.partition(_.contains(freshSnapRoot))
       val freshLhs = freshSnap(sorts.Snap, v)
       val bcsWithFreshLhs = bcsWithLhs.map(_.replace(freshSnapRoot, freshLhs))
@@ -455,7 +456,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
       case _ => sys.error("todo fail")
     }
 
-    val summarizedPcs = recordedBranches.map({case (_, branchConditions, _, conservedPcs, _) => {
+    val summarizedPcs = recordedBranches.map({case (_, branchConditions, _, conservedPcs, _, _) => {
       And(branchConditions ++ conservedPcs._1)
     }})
     val token = wandSnapshot.yieldToken(freshSnapRoot)
@@ -469,6 +470,12 @@ object magicWandSupporter extends SymbolicExecutionRules {
       parallelizeBranches = s.parallelizeBranches,
       equatedSnapshots = equatedSnapshotsToPropagate,
     )
+
+    // We assume that one of the definitions must hold (unguarded) - needed to reason about attached expressions
+    // if we don't emit a token (thus preventing us from accessing the definition, which should be doable).
+    val wandDefs = recordedBranches.map(_._6)
+    val wandDef = Forall(freshSnapRoot, Or(wandDefs), Trigger(wandSnapshot.applyToMWSF(freshSnapRoot)))
+    v.decider.assume(wandDef, None)
 
     v.decider.assume(guardedSummarizedPcs, None) //@ TODO debug exp
     /* The equatedSnapshots not containing the LHS *cannot* safely be propagated unguarded.
