@@ -407,7 +407,8 @@ class DefaultMainVerifier(config: Config,
           currentMember = Some(member),
           heapDependentTriggers = resourceTriggers,
           moreCompleteExhale = mce,
-          moreJoins = moreJoins)
+          moreJoins = moreJoins,
+          assumeWandSatisfiable = Verifier.config.assumeWandSatisfiable())
   }
 
   private def createInitialState(@unused cfg: SilverCfg,
@@ -429,7 +430,8 @@ class DefaultMainVerifier(config: Config,
       predicateSnapMap = predSnapGenerator.snapMap,
       predicateFormalVarMap = predSnapGenerator.formalVarMap,
       moreCompleteExhale = Verifier.config.exhaleMode == ExhaleMode.MoreComplete,
-      moreJoins = Verifier.config.moreJoins())
+      moreJoins = Verifier.config.moreJoins(),
+      assumeWandSatisfiable = Verifier.config.assumeWandSatisfiable())
   }
 
   private def excludeMethod(method: ast.Method) = (

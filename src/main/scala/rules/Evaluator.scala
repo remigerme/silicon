@@ -805,7 +805,7 @@ object evaluator extends EvaluationRules {
         })
 
       case ast.Attached(fact, wand) =>
-        evalAttachedThings(s, fact, wand, pve, v)((snapWand, freshSnapRoot, tF, _) => {
+        evalAttachedThings(s, fact, wand, pve, v)((_, snapWand, freshSnapRoot, tF, _) => {
           val token = snapWand.yieldToken(freshSnapRoot)
           Forall(freshSnapRoot, Implies(token, tF), Trigger(token), "attached")
         })(Q)
@@ -814,24 +814,29 @@ object evaluator extends EvaluationRules {
         val tryConsumeLhs = consume(s, wand.left, true, pve, v)((_, _, _) => Success())
         val lhsAvailable = tryConsumeLhs == Success()
 
-        evalAttachedThings(s, exp, wand, pve, v)((snapWand, freshSnapRoot, tExp, v1) => {
+        evalAttachedThings(s, exp, wand, pve, v)((s1, snapWand, freshSnapRoot, tExp, v1) => {
           val query = attachedExpIndependenceCondition(snapWand, freshSnapRoot, tExp, v1)
 
           if (!v1.decider.check(query, Verifier.config.checkTimeout())) {
-            return createFailure(pve dueTo AttachedExpDependsOnLhs(attached), v1, s, query, None) //@ TODO debug exp
+            return createFailure(pve dueTo AttachedExpDependsOnLhs(attached), v1, s1, query, None) //@ TODO debug exp
           }
 
-          //@ TODO replace "true" by an option set via a flag in the CLI?
-          if (true && !lhsAvailable) {
-            v1.logger.warn(s"We emit a token although we don't know if the left-hand side of the wand is satisfiable, aka we assume it is (unsound).")
+          if (lhsAvailable) {
+            v1.decider.assume(snapWand.yieldToken(freshSnapRoot), None)
+          } else {
+            if (s1.assumeWandSatisfiable) {
+              v1.logger.warn(s"We emit a token although we don't know if the left-hand side of the wand is satisfiable, aka we assume it is (unsound).")
+              v1.decider.assume(snapWand.yieldToken(freshSnapRoot), None)
+            }
           }
-          v1.decider.assume(snapWand.yieldToken(freshSnapRoot), None)
+          
           tExp
         })(Q)
       }
 
       case ast.AttachedExpValid(exp, wand) =>
-        evalAttachedThings(s, exp, wand, pve, v)(attachedExpIndependenceCondition)(Q)
+        evalAttachedThings(s, exp, wand, pve, v)((_, snapWand, freshSnapRoot, tExp, v1) => 
+          attachedExpIndependenceCondition(snapWand, freshSnapRoot, tExp, v1))(Q)
 
       /* Sequences */
 
@@ -1579,7 +1584,7 @@ object evaluator extends EvaluationRules {
                                  wand: ast.MagicWand,
                                  pve: PartialVerificationError,
                                  v: Verifier)
-                                (evalExp: (MagicWandSnapshot, Var, Term, Verifier) => Term)
+                                (evalExp: (State, MagicWandSnapshot, Var, Term, Verifier) => Term)
                                 (Q: (State, Term, Option[ast.Exp], Verifier) => VerificationResult)
                                 : VerificationResult = {
     // 0 - save the verifier
@@ -1613,7 +1618,7 @@ object evaluator extends EvaluationRules {
             // 6 - reverting the verifier
             v4.decider.popScope()
 
-            val tRes = evalExp(snapWandInner, freshSnapRoot, tExp, v4)
+            val tRes = evalExp(s4, snapWandInner, freshSnapRoot, tExp, v4)
             // We also need to assert that preconditions of functions mentioned in the fact hold,
             // otherwise the SMT solver is unable to reason over the function calls.
             v4.decider.assume(FunctionPreconditionTransformer.transform(tRes, s4.program), None)

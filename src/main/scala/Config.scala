@@ -691,6 +691,12 @@ class Config(args: Seq[String]) extends SilFrontendConfig(args, "Silicon") {
     noshort = true
   )
 
+  val assumeWandSatisfiable: ScallopOption[Boolean] = opt[Boolean]("assumeWandSatisfiable",
+    descr = "Assume that left-hand sides of magic wands are satisfiable when evaluating attached expressions.",
+    default = Some(false),
+    noshort = true
+  )
+
   /* Option validation (trailing file argument is validated by parent class) */
 
   validateOpt(prover) {
