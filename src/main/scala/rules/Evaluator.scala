@@ -805,46 +805,33 @@ object evaluator extends EvaluationRules {
         })
 
       case ast.Attached(fact, wand) =>
-        // 0 - save the verifier
-        v.decider.pushScope()
+        evalAttachedThings(s, fact, wand, pve, v)((snapWand, freshSnapRoot, tF, _) => {
+          val token = snapWand.yieldToken(freshSnapRoot)
+          Forall(freshSnapRoot, Implies(token, tF), Trigger(token), "attached")
+        })(Q)
 
-        // 1 - consuming the wand
-        consume(s, wand, true, pve, v)((s1, snapWand, v1) => {
-          val snapWandInner = snapWand.get match {
-            case snapshot: MagicWandSnapshot => snapshot
-            case SortWrapper(snapshot: MagicWandSnapshot, _) => snapshot
-            // TODO@ PredicateLookup?
-            case _ => sys.error("todo what about this")
+      case attached @ ast.AttachedExp(exp, wand) => {
+        val tryConsumeLhs = consume(s, wand.left, true, pve, v)((_, _, _) => Success())
+        val lhsAvailable = tryConsumeLhs == Success()
+
+        evalAttachedThings(s, exp, wand, pve, v)((snapWand, freshSnapRoot, tExp, v1) => {
+          val query = attachedExpIndependenceCondition(snapWand, freshSnapRoot, tExp, v1)
+
+          if (!v1.decider.check(query, Verifier.config.checkTimeout())) {
+            return createFailure(pve dueTo AttachedExpDependsOnLhs(attached), v1, s, query, None) //@ TODO debug exp
           }
 
-          val s1_ = s1.copy(h = v1.heapSupporter.getEmptyHeap(s1.program))
+          //@ TODO replace "true" by an option set via a flag in the CLI?
+          if (true && !lhsAvailable) {
+            v1.logger.warn(s"We emit a token although we don't know if the left-hand side of the wand is satisfiable, aka we assume it is (unsound).")
+          }
+          v1.decider.assume(snapWand.yieldToken(freshSnapRoot), None)
+          tExp
+        })(Q)
+      }
 
-          // 2 - creating a fresh snapshot to quantify on
-          val tSnap = viper.silicon.utils.freshSnap(sorts.Snap, v1)
-          val token = snapWandInner.yieldToken(tSnap)
-
-          // 3 - producing LHS
-          produce(s1_, toSf(tSnap), wand.left, pve, v1)((sLhs, v2) => {
-            val sLhs_ = sLhs.copy(h = v2.heapSupporter.getEmptyHeap(sLhs.program), 
-                                  oldHeaps = sLhs.oldHeaps + (Verifier.MAGIC_WAND_LHS_STATE_LABEL -> sLhs.h))
-
-            // 4 - producing RHS
-            produce(sLhs_, toSf(snapWandInner.applyToMWSF(tSnap)), wand.right, pve, v2)((s3, v3) => {
-
-              // 5 - evaluating fact
-              eval(s3, fact, pve, v3)((s4, tF, _, v4) => {
-                val attachedFact = Forall(tSnap, Implies(token, tF), Trigger(token), "attached")
-
-                // 6 - reverting the verifier and the initial heaps
-                v4.decider.popScope()
-                // We also need to assert that token => precondition of functions mentioned in the fact hold,
-                // otherwise the SMT solver is unable to reason over the function calls.
-                v4.decider.assume(FunctionPreconditionTransformer.transform(attachedFact, s4.program), None)
-                Q(s4.copy(h = s.h, oldHeaps = s.oldHeaps), attachedFact, None, v4)
-              })
-            })
-          })
-        })
+      case ast.AttachedExpValid(exp, wand) =>
+        evalAttachedThings(s, exp, wand, pve, v)(attachedExpIndependenceCondition)(Q)
 
       /* Sequences */
 
@@ -1585,6 +1572,69 @@ object evaluator extends EvaluationRules {
             Q(s3, t3, e3, v3)
           })
       }})
+  }
+
+  private def evalAttachedThings(s: State,
+                                 exp: ast.Exp, 
+                                 wand: ast.MagicWand,
+                                 pve: PartialVerificationError,
+                                 v: Verifier)
+                                (evalExp: (MagicWandSnapshot, Var, Term, Verifier) => Term)
+                                (Q: (State, Term, Option[ast.Exp], Verifier) => VerificationResult)
+                                : VerificationResult = {
+    // 0 - save the verifier
+    v.decider.pushScope()
+
+    // 1 - consuming the wand
+    consume(s, wand, true, pve, v)((sWand, snapWand, v1) => {
+      val s1 = sWand.copy(h = v1.heapSupporter.getEmptyHeap(sWand.program))
+
+      val snapWandInner = snapWand.get match {
+        case snapshot: MagicWandSnapshot => snapshot
+        case SortWrapper(snapshot: MagicWandSnapshot, _) => snapshot
+        //@ TODO PredicateLookup? and if consuming when false in context (smokeCheck)
+        case _ => sys.error("todo what about this")
+      }
+
+      // 2 - creating a fresh snapshot to quantify on
+      val freshSnapRoot = viper.silicon.utils.freshSnap(sorts.Snap, v1)
+
+      // 3 - producing LHS
+      produce(s1, toSf(freshSnapRoot), wand.left, pve, v1)((sLhs, v2) => {
+        val s2 = sLhs.copy(h = v2.heapSupporter.getEmptyHeap(sLhs.program), 
+                           oldHeaps = sLhs.oldHeaps + (Verifier.MAGIC_WAND_LHS_STATE_LABEL -> sLhs.h))
+
+        // 4 - producing RHS
+        produce(s2, toSf(snapWandInner.applyToMWSF(freshSnapRoot)), wand.right, pve, v2)((s3, v3) => {
+
+          // 5 - evaluating the expression
+          eval(s3, exp, pve, v3)((s4, tExp, _, v4) => {
+            
+            // 6 - reverting the verifier
+            v4.decider.popScope()
+
+            val tRes = evalExp(snapWandInner, freshSnapRoot, tExp, v4)
+            // We also need to assert that preconditions of functions mentioned in the fact hold,
+            // otherwise the SMT solver is unable to reason over the function calls.
+            v4.decider.assume(FunctionPreconditionTransformer.transform(tRes, s4.program), None)
+
+            Q(s4.copy(h = s.h, oldHeaps = s.oldHeaps), tRes, None, v4)
+          })
+        })
+      })
+    })
+  }
+
+  private def attachedExpIndependenceCondition(snapWand: MagicWandSnapshot, freshSnapRoot: Var, tExp: Term, v: Verifier): Term = {
+    val t1 = viper.silicon.utils.freshSnap(sorts.Snap, v)
+    val t2 = viper.silicon.utils.freshSnap(sorts.Snap, v)
+    val tExp1 = tExp.replace(freshSnapRoot, t1)
+    val tExp2 = tExp.replace(freshSnapRoot, t2)
+    val token1 = snapWand.yieldToken(t1)
+    val token2 = snapWand.yieldToken(t2)
+
+    //@ TODO triggers
+    Forall(Seq(t1, t2), Implies(And(token1, token2), tExp1 === tExp2), Trigger(tExp1))
   }
 
   private[silicon] case object FromShortCircuitingAnd extends ast.Info {

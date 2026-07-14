@@ -261,6 +261,8 @@ trait ExpressionTranslator {
              | _: ast.Applying
              | _: ast.Attached
              | _: ast.Attaching
+             | _: ast.AttachedExp
+             | _: ast.AttachedExpValid
              | _: ast.InhaleExhaleExp
              | _: ast.PredicateAccess
              | _: ast.FuncApp
