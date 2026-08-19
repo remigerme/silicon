@@ -11,5 +11,5 @@ MESSAGE="--select=findEntriesWithInv_c13ece1f_PMTraceManager,findEntryWithInv_c1
 CMD_UPSTREAM="java $JAVA_ARGS -jar $SILICON_UPSTREAM $SILICON_ARGS"
 CMD_FORK="java $JAVA_ARGS -jar $SILICON_FORK $SILICON_ARGS"
 
-hyperfine --runs 3 "$CMD_UPSTREAM $ROUTER" "$CMD_FORK $ROUTER" --export-markdown bench-results-router.md
-hyperfine --runs 10 "$CMD_UPSTREAM $MESSAGE" "$CMD_FORK $MESSAGE" --export-markdown bench-results-message.md
+hyperfine --runs 5 "$CMD_UPSTREAM $ROUTER" "$CMD_FORK $ROUTER" --export-markdown bench-results-router.md
+hyperfine --runs 15 "$CMD_UPSTREAM $MESSAGE" "$CMD_FORK $MESSAGE" --export-markdown bench-results-message.md
